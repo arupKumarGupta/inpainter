@@ -1,6 +1,6 @@
 # Inpainter — Detailed Architecture
 
-> N-Pass Multi-Character Inpainting Pipeline on ComfyUI
+> N-Pass Multi-Character Inpainting Pipeline using Hugging Face `diffusers`
 
 ---
 
@@ -9,15 +9,16 @@
 ```mermaid
 flowchart TD
     A["User / CLI / Management UI"] --> B["Inpainter Orchestrator\n(Python Backend)"]
-    B --> C["ComfyUI\n(Headless, API Mode)"]
-    C --> D["Flux1-Dev Checkpoint"]
-    C --> E["LoRA Loader\n(per character)"]
-    C --> F["ControlNet\n(Pose / Depth / Edge)"]
-    C --> G["Inpaint VAE / Mask Pipeline"]
-    B --> H["Job Queue\n(Pass Scheduler)"]
-    H --> B
-    B --> I["Output Storage\n(Pass images + final)"]
-    I --> A
+    B --> C["Pass Scheduler"]
+    C --> D["Pipeline Runner\n(diffusers)"]
+    D --> E["FluxInpaintPipeline\nor FluxControlNetInpaintPipeline"]
+    E --> F["Flux1-Dev Weights\n(loaded once, resident in VRAM)"]
+    E --> G["LoRA Loader\nload_lora_weights / unload_lora_weights\n(swapped per pass)"]
+    E --> H["ControlNet\n(Pose / Depth / Edge — optional)"]
+    B --> I["Mask Manager\n(Pillow / NumPy / SAM)"]
+    I --> D
+    B --> J["Output Storage\n(pass images + final)"]
+    J --> A
 ```
 
 ---
@@ -26,35 +27,36 @@ flowchart TD
 
 ### 1. Management UI
 
-A web-based control panel that serves as the primary interface for configuring and triggering generation jobs.
+A web-based control panel built on **FastAPI** + a lightweight frontend.
 
 **Responsibilities:**
 - Define the **scene prompt** (global description of environment, lighting, mood)
 - Configure **N characters** with individual:
   - Character prompt (appearance, clothing, expression)
   - Character LoRA path and strength (optional)
-  - ControlNet input (pose image, depth map, edge map — optional)
-  - Mask placement / bounding box in scene
+  - ControlNet input — pose image, depth map, or edge map (optional)
+  - Mask placement: bounding box or polygon
 - Set **global generation parameters**: resolution, steps, CFG scale, sampler, scheduler, seed
-- Trigger generation jobs and monitor pass-by-pass progress
-- Preview intermediate outputs (after each pass)
-- Download final composed image
+- Trigger generation jobs and monitor pass-by-pass progress via SSE / WebSocket
+- Preview intermediate outputs after each pass
+- Download the final composed image
 
 ---
 
 ### 2. CLI Tool
 
-A command-line interface exposing all Management UI capabilities for scripting and automation.
+A command-line interface built with **`typer`** or **`click`**, exposing all pipeline capabilities.
 
 ```bash
 # Example usage
 inpainter generate \
   --scene "A cyberpunk alley at night, neon lights" \
-  --character "name=Alice,prompt=woman in red jacket,lora=alice_v2.safetensors,lora_strength=0.8" \
-  --character "name=Bob,prompt=man in grey coat,lora=bob_v1.safetensors,lora_strength=0.75" \
+  --character "name=Alice,prompt=woman in red jacket,lora=loras/alice_v2.safetensors,lora_strength=0.8" \
+  --character "name=Bob,prompt=man in grey coat,lora=loras/bob_v1.safetensors,lora_strength=0.75" \
   --width 1024 --height 1024 \
-  --steps 30 --cfg 7.0 \
-  --output ./output/scene_01.png
+  --steps 30 --cfg 3.5 \
+  --output ./output/scene_01.png \
+  --save-intermediates
 ```
 
 **Key CLI flags:**
@@ -62,31 +64,32 @@ inpainter generate \
 |---|---|
 | `--scene` | Global scene/background prompt |
 | `--character` | Repeatable; defines one character (prompt, LoRA, ControlNet, mask) |
-| `--n` | Number of characters (inferred from `--character` count) |
-| `--model` | Base checkpoint path (default: Flux1-Dev) |
-| `--controlnet` | ControlNet model path and type |
+| `--model` | Base model path or HF repo ID (default: `black-forest-labs/FLUX.1-dev`) |
+| `--controlnet` | ControlNet model path/repo and type per character |
 | `--steps` | Sampling steps per pass |
-| `--cfg` | CFG guidance scale |
-| `--seed` | Base seed (per-pass seeds derived from this) |
+| `--cfg` | Guidance scale (CFG) |
+| `--seed` | Base seed; per-pass seeds derived from this |
 | `--output` | Output path for final image |
-| `--save-intermediates` | Save images after each pass |
+| `--save-intermediates` | Save `pass_0.png` through `pass_N.png` |
+| `--device` | Torch device (`cuda`, `cpu`, `mps`) |
+| `--dtype` | Model dtype (`float16`, `bfloat16`) |
 
 ---
 
 ### 3. Inpainter Orchestrator (Backend)
 
-The Python backend that coordinates the entire N-pass pipeline. It translates high-level job configurations into ComfyUI API calls, manages pass sequencing, mask state, and assembles the final image.
+The Python backend that coordinates the entire N-pass pipeline. It manages pass sequencing, mask state, LoRA swapping, and ControlNet injection — all in-process via `diffusers`.
 
 ```mermaid
 flowchart TD
     JC["Job Config\n(scene, characters, params)"] --> PS["Pass Scheduler"]
-    PS --> P0["Pass 0\nScene + N Masks"]
+    PS --> P0["Pass 0\nScene + N Masks\nFluxPipeline"]
     P0 --> MS["Mask State Manager"]
-    MS --> P1["Pass 1\nInpaint CHAR_1"]
+    MS --> P1["Pass 1 — Inpaint CHAR_1\nFluxInpaintPipeline + LoRA_1"]
     P1 --> MS
-    MS --> P2["Pass 2\nInpaint CHAR_2"]
+    MS --> P2["Pass 2 — Inpaint CHAR_2\nFluxInpaintPipeline + LoRA_2"]
     P2 --> MS
-    MS --> PN["Pass N\nInpaint CHAR_N"]
+    MS --> PN["Pass N — Inpaint CHAR_N\nFluxInpaintPipeline + LoRA_N"]
     PN --> FO["Final Output"]
 ```
 
@@ -94,24 +97,112 @@ flowchart TD
 
 | Component | Role |
 |---|---|
-| **Pass Scheduler** | Sequences Pass 0 → Pass N; manages dependencies between passes |
-| **Mask State Manager** | Tracks which masks are active, generates binary mask images per pass |
-| **Workflow Builder** | Dynamically constructs ComfyUI JSON workflow graphs per pass |
-| **ComfyUI API Client** | Submits workflows, polls job status, retrieves images |
-| **LoRA Injector** | Injects the character-specific LoRA node into the workflow for each pass |
-| **ControlNet Injector** | Injects ControlNet conditioning node if pose/depth input is provided |
-| **Image Compositor** | (Optional) post-processes and composites intermediate outputs |
+| **Pass Scheduler** | Sequences Pass 0 → Pass N; manages inter-pass image handoff |
+| **Pipeline Runner** | Wraps `diffusers` pipeline calls; handles LoRA load/unload lifecycle |
+| **Mask State Manager** | Tracks active masks, generates binary PIL mask images per pass |
+| **LoRA Manager** | Calls `pipe.load_lora_weights()` before each character pass, `pipe.unload_lora_weights()` after |
+| **ControlNet Manager** | Conditionally switches between `FluxInpaintPipeline` and `FluxControlNetInpaintPipeline` |
+| **Image Compositor** | (Optional) post-processes and composites intermediate pass outputs |
 
 ---
 
-### 4. ComfyUI (Headless)
+### 4. Pipeline Runner — `diffusers` Integration
 
-ComfyUI runs in **API mode** with no browser UI. The Orchestrator communicates exclusively through its REST/WebSocket API.
+The model is loaded **once** at startup and kept resident in VRAM. LoRAs are swapped per pass. This avoids costly model reloads between passes.
 
-- Endpoint: `http://localhost:8188`
-- Workflow submission: `POST /prompt`
-- Image retrieval: `GET /view?filename=...`
-- Status: WebSocket `ws://localhost:8188/ws`
+#### Model Load (startup)
+
+```python
+from diffusers import FluxInpaintPipeline
+import torch
+
+pipe = FluxInpaintPipeline.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    torch_dtype=torch.bfloat16,
+).to("cuda")
+
+# Optional: memory efficiency
+pipe.enable_model_cpu_offload()
+pipe.enable_vae_tiling()
+```
+
+#### Pass 0 — Scene Generation
+
+```python
+from diffusers import FluxPipeline
+
+scene_pipe = FluxPipeline.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    torch_dtype=torch.bfloat16,
+).to("cuda")
+
+# Prompt includes description of N masked silhouette areas
+scene_image = scene_pipe(
+    prompt=scene_prompt_with_masks,
+    width=width,
+    height=height,
+    num_inference_steps=steps,
+    guidance_scale=cfg,
+    generator=torch.Generator().manual_seed(seed),
+).images[0]
+
+scene_image.save("pass_0.png")
+```
+
+#### Pass i — Character Inpainting (with LoRA)
+
+```python
+# Load character LoRA for this pass
+if char_i.lora_path:
+    pipe.load_lora_weights(char_i.lora_path, adapter_name=f"char_{i}")
+    pipe.set_adapters([f"char_{i}"], adapter_weights=[char_i.lora_strength])
+
+result = pipe(
+    prompt=f"{scene_prompt}, {char_i.prompt}",
+    image=prev_pass_image,          # PIL Image from pass i-1
+    mask_image=mask_i,              # Binary PIL mask (white = inpaint)
+    width=width,
+    height=height,
+    num_inference_steps=steps,
+    strength=denoise_strength,      # 0.75 – 0.95
+    guidance_scale=cfg,
+    generator=torch.Generator().manual_seed(seed + i),
+).images[0]
+
+# Unload LoRA before next pass
+if char_i.lora_path:
+    pipe.unload_lora_weights()
+
+result.save(f"pass_{i}.png")
+```
+
+#### Pass i — With ControlNet (optional)
+
+```python
+from diffusers import FluxControlNetInpaintPipeline, FluxControlNetModel
+
+controlnet = FluxControlNetModel.from_pretrained(
+    "InstantX/FLUX.1-dev-Controlnet-Union",
+    torch_dtype=torch.bfloat16,
+)
+
+cn_pipe = FluxControlNetInpaintPipeline.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    controlnet=controlnet,
+    torch_dtype=torch.bfloat16,
+).to("cuda")
+
+result = cn_pipe(
+    prompt=f"{scene_prompt}, {char_i.prompt}",
+    image=prev_pass_image,
+    mask_image=mask_i,
+    control_image=char_i.controlnet_image,   # Pose / depth / edge PIL image
+    controlnet_conditioning_scale=char_i.controlnet_strength,
+    num_inference_steps=steps,
+    strength=denoise_strength,
+    guidance_scale=cfg,
+).images[0]
+```
 
 ---
 
@@ -119,22 +210,12 @@ ComfyUI runs in **API mode** with no browser UI. The Orchestrator communicates e
 
 ### Pass 0: Scene Generation with N Masks
 
-**Goal:** Generate the base scene image establishing composition, background, lighting, and rough character positions — but with masked placeholder shapes instead of real characters.
+**Goal:** Generate the base scene establishing composition, background, and lighting — with N clearly demarcated placeholder regions for each character.
 
-**Inputs:**
-- Scene prompt (global)
-- N mask regions (bounding boxes or segmentation polygons)
-- Base checkpoint (Flux1-Dev)
-- Global generation params (resolution, steps, CFG, seed)
-
-**Workflow nodes (ComfyUI graph):**
-```
-CheckpointLoader → CLIPTextEncode[scene_prompt] → KSampler
-                                                       ↑
-                                     [Mask compositor: N mask overlays baked into latent]
-                                                       ↓
-                                              VAEDecode → SaveImage[pass_0.png]
-```
+**Strategy for mask placeholders (choose one):**
+- **Prompt-based**: Include `[silhouette of person 1]`, `[silhouette of person 2]` in the scene prompt to let the model generate natural placeholder shapes.
+- **Baked overlay**: Composite N solid-colour rectangles or ellipses onto a neutral canvas and use it as the `image` input for a low-strength inpaint pass.
+- **Text-to-image then mask**: Run a standard `FluxPipeline` generate, then use SAM or manual bounding boxes to identify and record mask regions from the output.
 
 **Output:** `pass_0.png` — full scene with N clearly demarcated placeholder shapes.
 
@@ -147,52 +228,33 @@ For each character `i` in `1..N`:
 **Goal:** Replace `MASK_i` with fully rendered `CHAR_i`, keeping all other regions pixel-perfect.
 
 **Inputs:**
-- Output image from previous pass (`pass_{i-1}.png`)
-- Binary inpaint mask for `MASK_i` region only
+- `pass_{i-1}.png` — output image from previous pass
+- Binary inpaint mask covering only `MASK_i` region
 - Character prompt for `CHAR_i`
-- Character LoRA for `CHAR_i` (if available)
-- ControlNet conditioning for `CHAR_i` (if pose/depth provided)
-- Inpainting params (denoise strength, padding, blur)
-
-**Workflow nodes (ComfyUI graph):**
-
-```
-CheckpointLoader
-      ↓
-LoRALoader[char_i_lora, strength]        ← Only for pass i
-      ↓
-CLIPTextEncode[scene_prompt + char_i_prompt]
-      ↓
-VAEEncodeForInpaint[pass_{i-1}.png, mask_i]
-      ↓
-ControlNetApply[pose_i / depth_i]        ← Optional
-      ↓
-KSamplerAdvanced[denoise=0.75..0.95]
-      ↓
-VAEDecode → SaveImage[pass_i.png]
-```
+- Character LoRA path + strength (optional)
+- ControlNet conditioning image (optional)
 
 **Key inpainting parameters:**
 
 | Parameter | Recommended Range | Notes |
 |---|---|---|
-| Denoise strength | 0.75 – 0.95 | Lower = more faithful to existing scene |
+| `strength` (denoise) | 0.75 – 0.95 | Lower = preserves more of existing scene |
 | Mask padding | 16 – 32 px | Softens mask boundary |
-| Mask blur | 4 – 12 px | Feathers edge for natural blending |
-| Mask grow | 8 – 16 px | Expands mask slightly to avoid hard edges |
-| LoRA strength | 0.6 – 0.9 | Per-character; tune for identity vs. style balance |
+| Mask blur (`GaussianBlur`) | 4 – 12 px | Feathers edge for natural blending |
+| Mask grow (dilate) | 8 – 16 px | Expands mask slightly to avoid hard edges |
+| LoRA strength | 0.6 – 0.9 | Tune per character for identity vs. style balance |
 
 ---
 
 ### Pass N Output: Final Image
 
-After Pass N completes, `pass_N.png` is the final image containing all N consistent characters in the scene. The Orchestrator copies this as the canonical output.
+After Pass N, `pass_N.png` is the final image containing all N consistent characters. It is copied to the user-specified output path.
 
 ---
 
 ## Mask Management Strategy
 
-The mask for each character pass is a **binary image** (white = inpaint region, black = preserve):
+Each pass uses a **binary PIL mask** (`mode="L"`, white = inpaint, black = preserve):
 
 ```
 Pass 1 mask:  ██░░░░  (only CHAR_1 slot is white)
@@ -200,10 +262,23 @@ Pass 2 mask:  ░░██░░  (only CHAR_2 slot is white)
 Pass N mask:  ░░░░██  (only CHAR_N slot is white)
 ```
 
-Mask generation strategies:
-- **Bounding box**: Simple rectangular mask per character slot
-- **Segmentation**: Semantic/manual polygon mask for irregular character shapes
-- **Auto-segment**: Use SAM (Segment Anything Model) on Pass 0 output to auto-derive masks
+**Mask generation with Pillow:**
+```python
+from PIL import Image, ImageFilter
+import numpy as np
+
+def make_mask(width, height, bbox, padding=24, blur=8, grow=12):
+    mask = Image.new("L", (width, height), 0)
+    x, y, w, h = bbox
+    # Grow the region
+    region = (x - grow, y - grow, x + w + grow, y + h + grow)
+    mask.paste(255, region)
+    # Blur edges
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=blur))
+    return mask
+```
+
+**Auto-segmentation (optional):** Use SAM (Segment Anything Model) on `pass_0.png` to automatically derive character masks from the generated placeholder regions.
 
 ---
 
@@ -211,26 +286,33 @@ Mask generation strategies:
 
 | Pass | LoRA Applied |
 |---|---|
-| Pass 0 | None (scene generation, no character identity yet) |
-| Pass 1 | `char_1.lora` (if provided) |
-| Pass 2 | `char_2.lora` (if provided) |
+| Pass 0 | None — scene generation only |
+| Pass 1 | `char_1.lora` via `pipe.load_lora_weights()` |
+| Pass 2 | `char_2.lora` via `pipe.load_lora_weights()` |
 | … | … |
-| Pass N | `char_N.lora` (if provided) |
+| Pass N | `char_N.lora` via `pipe.load_lora_weights()` |
 
 > [!IMPORTANT]
-> Each pass loads **only the LoRA for the character being inpainted in that pass**. Applying multiple character LoRAs simultaneously causes identity blending and degrades consistency.
+> Each pass loads **only the LoRA for the character being inpainted**. The LoRA is unloaded with `pipe.unload_lora_weights()` immediately after the pass completes. Applying multiple character LoRAs simultaneously causes identity blending and degrades consistency.
 
 ---
 
 ## ControlNet Integration
 
-ControlNet is applied **per pass** at the character level:
+ControlNet is applied **per pass** at the character level. The Pipeline Runner conditionally switches between:
 
-- **Pose ControlNet (OpenPose)**: Provide a pose skeleton image per character to control body orientation and gesture.
-- **Depth ControlNet**: Provide a depth map to control spatial placement and perspective.
-- **Edge/Canny ControlNet**: Provide edge maps for fine structural control.
+- `FluxInpaintPipeline` — no ControlNet (default)
+- `FluxControlNetInpaintPipeline` — when a character has ControlNet input
 
-If a ControlNet input is not provided for a character, that pass skips ControlNet conditioning entirely.
+**Supported ControlNet types per character:**
+
+| Type | Input | Use Case |
+|---|---|---|
+| OpenPose | Pose skeleton image | Control body orientation and gesture |
+| Depth | Depth map | Control spatial placement and perspective |
+| Canny / Edge | Edge map | Fine structural / clothing detail control |
+
+If no ControlNet input is provided for a character, that pass uses the base `FluxInpaintPipeline`.
 
 ---
 
@@ -241,27 +323,28 @@ sequenceDiagram
     actor User
     participant UI as Management UI / CLI
     participant Orch as Orchestrator
-    participant Queue as Pass Scheduler
-    participant ComfyUI
+    participant Sched as Pass Scheduler
+    participant Runner as Pipeline Runner (diffusers)
     participant Store as Output Storage
 
     User->>UI: Configure scene + N characters
     UI->>Orch: Submit Job (JobConfig)
-    Orch->>Queue: Enqueue Pass 0
-    Queue->>Orch: Execute Pass 0
-    Orch->>ComfyUI: POST /prompt (scene workflow)
-    ComfyUI-->>Orch: pass_0.png
+    Orch->>Sched: Enqueue Pass 0
+    Sched->>Runner: Run Pass 0 (FluxPipeline)
+    Runner-->>Orch: pass_0.png (PIL Image)
     Orch->>Store: Save pass_0.png
 
     loop For i = 1 to N
-        Queue->>Orch: Execute Pass i
-        Orch->>ComfyUI: POST /prompt (inpaint workflow + LoRA_i + mask_i)
-        ComfyUI-->>Orch: pass_i.png
+        Sched->>Runner: Run Pass i
+        Runner->>Runner: load_lora_weights(char_i.lora)
+        Runner->>Runner: FluxInpaintPipeline(image=pass_i-1, mask=mask_i)
+        Runner->>Runner: unload_lora_weights()
+        Runner-->>Orch: pass_i.png (PIL Image)
         Orch->>Store: Save pass_i.png
     end
 
     Orch->>Store: Copy pass_N.png → final_output.png
-    Orch->>UI: Notify complete + return final_output.png
+    Orch->>UI: Notify complete + return path
     UI->>User: Display result
 ```
 
@@ -277,12 +360,12 @@ job:
     width: 1024
     height: 1024
   model:
-    checkpoint: "flux1-dev.safetensors"
+    repo_id: "black-forest-labs/FLUX.1-dev"   # or local path
+    dtype: "bfloat16"
+    device: "cuda"
   sampler:
-    name: "dpm_2m"
-    scheduler: "karras"
     steps: 30
-    cfg: 7.0
+    cfg: 3.5
     seed: 42
 
   characters:
@@ -317,7 +400,7 @@ job:
         height: 530
 
   inpaint:
-    denoise_strength: 0.85
+    strength: 0.85
     mask_padding: 24
     mask_blur: 8
     mask_grow: 12
@@ -335,28 +418,49 @@ job:
 inpainter/
 ├── README.md
 ├── ARCHITECTURE.md
+├── pyproject.toml              # Dependencies: diffusers, transformers, torch, Pillow, typer, fastapi
 ├── cli/
-│   └── main.py               # CLI entry point
+│   └── main.py                 # CLI entry point (typer / click)
 ├── orchestrator/
-│   ├── job.py                # Job config schema & loader
-│   ├── scheduler.py          # Pass scheduler
-│   ├── mask_manager.py       # Mask state management
-│   ├── workflow_builder.py   # ComfyUI workflow JSON builder
-│   ├── comfyui_client.py     # ComfyUI REST/WS API client
-│   ├── lora_injector.py      # LoRA node injection
-│   └── controlnet_injector.py # ControlNet node injection
+│   ├── job.py                  # Job config schema & loader (Pydantic)
+│   ├── scheduler.py            # Pass scheduler (sequences Pass 0 → N)
+│   ├── mask_manager.py         # Binary mask generation (Pillow / NumPy / SAM)
+│   ├── pipeline_runner.py      # diffusers pipeline wrapper (FluxInpaintPipeline)
+│   ├── lora_manager.py         # load_lora_weights / unload_lora_weights lifecycle
+│   └── controlnet_manager.py   # Conditional ControlNet pipeline selection
 ├── ui/
-│   ├── app.py                # Management UI backend (FastAPI / Flask)
-│   └── frontend/             # Web frontend (React / plain HTML)
-├── workflows/
-│   ├── scene_base.json       # ComfyUI workflow template: Pass 0
-│   └── inpaint_char.json     # ComfyUI workflow template: Pass 1..N
+│   ├── app.py                  # FastAPI backend (REST + SSE progress)
+│   └── frontend/               # Web frontend (HTML/JS or React)
 ├── config/
-│   └── defaults.yaml         # Default generation parameters
-├── inputs/                   # Pose/depth/edge ControlNet inputs
-├── output/                   # Generated images (intermediates + final)
+│   └── defaults.yaml           # Default generation parameters
+├── inputs/                     # Pose/depth/edge ControlNet inputs
+├── output/                     # Generated images (intermediates + final)
 └── tests/
     └── ...
+```
+
+---
+
+## Python Dependencies
+
+```toml
+[project]
+dependencies = [
+    "diffusers>=0.30.0",
+    "transformers>=4.44.0",
+    "accelerate>=0.33.0",
+    "torch>=2.3.0",
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0",
+    "typer>=0.12.0",         # CLI
+    "fastapi>=0.112.0",      # Management UI backend
+    "uvicorn>=0.30.0",       # ASGI server
+    "pydantic>=2.0.0",       # Job config validation
+    # Optional:
+    # "segment-anything>=1.0"  # SAM auto-mask
+    # "controlnet-aux>=0.0.9"  # Pose/depth preprocessors
+]
 ```
 
 ---
@@ -365,10 +469,10 @@ inpainter/
 
 The N-pass architecture achieves character consistency through:
 
-1. **Frozen background**: The mask for each pass covers only the target character's region. All other pixels are preserved exactly from the previous pass output.
-2. **Per-character LoRA**: Each character's LoRA is active only during its own pass, preventing cross-contamination of identity features.
-3. **Low denoise on character region**: A denoise strength below 1.0 ensures the character's inpainted region integrates with the scene's existing lighting and shadows.
-4. **Shared scene conditioning**: The global scene prompt is included in every pass, anchoring each character to the same environment context.
+1. **Frozen background** — Each pass mask covers only the target character's slot. All other pixels are preserved exactly from the previous pass via `diffusers`' inpaint masking.
+2. **Per-character LoRA isolation** — Each character's LoRA is active only during its pass. It is fully unloaded before the next pass via `pipe.unload_lora_weights()`.
+3. **Controlled denoise strength** — `strength < 1.0` ensures the inpainted character integrates with the scene's existing lighting and shadows.
+4. **Shared scene conditioning** — The global scene prompt is prepended to every character pass prompt, anchoring all characters to the same environment context.
 
 ---
 
@@ -376,9 +480,10 @@ The N-pass architecture achieves character consistency through:
 
 | Limitation | Mitigation / Roadmap |
 |---|---|
-| Characters must not heavily overlap | Use pose ControlNet to enforce non-overlapping body regions |
-| Pass count scales linearly with N | Parallelization possible for non-overlapping regions |
-| LoRA availability per character | Falls back gracefully to prompt-only conditioning |
-| Mask bleeding at edges | Feathered masks + slight mask grow minimizes artifacts |
+| Characters must not heavily overlap | Use pose ControlNet to enforce non-overlapping body positions |
+| Pass count scales linearly with N | Parallelization possible for spatially non-overlapping regions |
+| LoRA availability per character | Falls back to prompt-only conditioning if LoRA not provided |
+| Mask boundary artifacts | Feathered masks (`GaussianBlur`) + mask grow minimizes edge bleed |
 | Character lighting consistency | Depth/normal ControlNet or lighting-aware inpaint models |
-| Long generation time for large N | Queue prioritization, async progress, incremental preview |
+| Long generation time for large N | Async job queue, incremental pass previews, `torch.compile` for speedup |
+| VRAM pressure with ControlNet | `enable_model_cpu_offload()` + `enable_vae_tiling()` on constrained GPUs |
