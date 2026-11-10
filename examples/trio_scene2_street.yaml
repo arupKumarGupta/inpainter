@@ -1,0 +1,64 @@
+job:
+  scene_prompt: "Sunny European pedestrian street in golden hour, historic brick architecture, trees lining the clean cobblestone sidewalk, three people walking side by side, soft warm natural lighting, 8k, photorealistic"
+  negative_prompt: "blurry, low quality, deformed, extra limbs, ugly, bad anatomy, artifacts"
+  resolution:
+    width: 1024
+    height: 1024
+  model:
+    repo_id: "black-forest-labs/FLUX.1-dev"
+    dtype: "bfloat16"
+    device: "cuda"
+  sampler:
+    steps: 20
+    cfg: 3.5
+    seed: 420
+
+  characters:
+    - id: "hari"
+      name: "Hari (har1)"
+      prompt: "photo of tfphar1, a man with dark hair with grey temples, friendly smile, wearing a dark green utility jacket and casual jeans, walking on the left side of the street with hands in pockets"
+      lora:
+        path: "loras/har1.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 60
+        y: 150
+        width: 290
+        height: 730
+
+    - id: "onish"
+      name: "0n15h"
+      prompt: "photo of 0n15h, young man with short dark hair, lively smiling expression, wearing a warm tan bomber jacket over white shirt, walking in the center looking between his friends"
+      lora:
+        path: "loras/0n15h.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 370
+        y: 140
+        width: 290
+        height: 740
+
+    - id: "rishi"
+      name: "Rishi (r15h1)"
+      prompt: "photo of rishi, handsome man wearing black rectangular eyeglasses, styled voluminous black hair, neat full beard, wearing a charcoal grey jacket and denim jeans, carrying a backpack, walking on the right laughing mid-conversation"
+      lora:
+        path: "loras/rishi.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 680
+        y: 150
+        width: 290
+        height: 730
+
+  inpaint:
+    strength: 0.88
+    mask_padding: 24
+    mask_blur: 10
+    mask_grow: 16
+
+  output:
+    path: "./output/trio_scene2_street.png"
+    save_intermediates: true

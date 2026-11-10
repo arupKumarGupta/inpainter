@@ -1,0 +1,115 @@
+# ==============================================================================
+# Inpainter — Docker Compose
+#
+# Profiles:
+#   cuda    — Full stack with CUDA backend (Ubuntu + NVIDIA GPU)
+#   cpu     — Full stack with CPU backend (Mac Docker or no GPU)
+#
+# Usage:
+#   CUDA:  docker compose --profile cuda up
+#   CPU:   docker compose --profile cpu up
+#
+# Note: MPS (Apple Silicon GPU) requires running natively without Docker.
+# ==============================================================================
+
+services:
+  # ─────────────────────────────────────────────
+  # Backend — CUDA (Ubuntu + NVIDIA RTX GPU)
+  # ─────────────────────────────────────────────
+  api-cuda:
+    profiles: [cuda]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: inpainter-api:cuda
+    container_name: inpainter-api-cuda
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Persist HuggingFace cache (~24GB for FLUX.1-dev)
+      - "${HF_HOME:-~/.cache/huggingface}:/app/.cache/huggingface"
+      # Mount local LoRAs and inputs
+      - "./loras:/app/loras:ro"
+      - "./inputs:/app/inputs:ro"
+      # Persist generation outputs
+      - "./output:/app/output"
+    environment:
+      - INPAINTER_DEVICE=cuda
+      - HF_HOME=/app/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - inpainter-net
+
+  # ─────────────────────────────────────────────
+  # Backend — CPU (Mac Docker or fallback)
+  # ─────────────────────────────────────────────
+  api-cpu:
+    profiles: [cpu]
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: inpainter-api:cpu
+    container_name: inpainter-api-cpu
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - "${HF_HOME:-~/.cache/huggingface}:/app/.cache/huggingface"
+      - "./loras:/app/loras:ro"
+      - "./inputs:/app/inputs:ro"
+      - "./output:/app/output"
+    environment:
+      - INPAINTER_DEVICE=cpu
+      - HF_HOME=/app/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+    restart: unless-stopped
+    networks:
+      - inpainter-net
+
+  # ─────────────────────────────────────────────
+  # Frontend — React Web App
+  # ─────────────────────────────────────────────
+  frontend-cuda:
+    profiles: [cuda]
+    build:
+      context: ./ui/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    image: inpainter-frontend:latest
+    container_name: inpainter-frontend-cuda
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - api-cuda
+    restart: unless-stopped
+    networks:
+      - inpainter-net
+
+  frontend-cpu:
+    profiles: [cpu]
+    build:
+      context: ./ui/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    image: inpainter-frontend:latest
+    container_name: inpainter-frontend-cpu
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - api-cpu
+    restart: unless-stopped
+    networks:
+      - inpainter-net
+
+networks:
+  inpainter-net:
+    driver: bridge

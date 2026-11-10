@@ -1,0 +1,64 @@
+job:
+  scene_prompt: "Modern bright tech startup office interior, glass walls, large whiteboard, wooden standing desk, soft indoor ambient lighting, plants and laptop screens in background, 8k, photorealistic"
+  negative_prompt: "blurry, low quality, deformed, extra limbs, ugly, bad anatomy, artifacts"
+  resolution:
+    width: 1024
+    height: 1024
+  model:
+    repo_id: "black-forest-labs/FLUX.1-dev"
+    dtype: "bfloat16"
+    device: "cuda"
+  sampler:
+    steps: 20
+    cfg: 3.5
+    seed: 310
+
+  characters:
+    - id: "hari"
+      name: "Hari (har1)"
+      prompt: "photo of tfphar1, a man with dark hair with grey temples, gentle warm smile, wearing a casual navy blue collared shirt, seated on a modern office stool on the left, looking engaged"
+      lora:
+        path: "loras/har1.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 60
+        y: 160
+        width: 290
+        height: 720
+
+    - id: "rishi"
+      name: "Rishi (r15h1)"
+      prompt: "photo of rishi, handsome man wearing black rectangular eyeglasses, styled voluminous black hair, neat full beard, wearing a textured dark grey t-shirt, standing in the center leaning near whiteboard, confident smile"
+      lora:
+        path: "loras/rishi.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 370
+        y: 140
+        width: 290
+        height: 740
+
+    - id: "onish"
+      name: "0n15h"
+      prompt: "photo of 0n15h, young man with short dark hair, friendly cheerful smile, wearing a beige button-up casual shirt, standing on the right holding a coffee mug, looking at his colleagues"
+      lora:
+        path: "loras/0n15h.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 680
+        y: 160
+        width: 290
+        height: 720
+
+  inpaint:
+    strength: 0.88
+    mask_padding: 24
+    mask_blur: 10
+    mask_grow: 16
+
+  output:
+    path: "./output/trio_scene1_office.png"
+    save_intermediates: true

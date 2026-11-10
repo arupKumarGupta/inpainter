@@ -1,0 +1,29 @@
+# Default generation parameters — override per job
+model:
+  repo_id: "black-forest-labs/FLUX.1-dev"
+  dtype: "auto"      # auto | float16 | bfloat16 | float32
+  device: "auto"     # auto | cuda | mps | cpu
+
+resolution:
+  width: 1024
+  height: 1024
+
+sampler:
+  steps: 30
+  cfg: 3.5
+  seed: 42
+
+inpaint:
+  strength: 0.85
+  mask_padding: 24
+  mask_blur: 8
+  mask_grow: 12
+
+output:
+  path: "./output/final.png"
+  save_intermediates: true
+
+memory:
+  enable_cpu_offload: auto    # auto = decide based on VRAM
+  enable_vae_tiling: true
+  enable_torch_compile: false # Experimental: torch.compile speedup

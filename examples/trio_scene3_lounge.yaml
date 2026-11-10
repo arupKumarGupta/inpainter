@@ -1,0 +1,64 @@
+job:
+  scene_prompt: "Atmospheric cozy restaurant lounge booth at evening, warm amber lighting, plush leather booth seating, dark polished wood table with beverages, three friends sitting together enjoying dinner, cinematic lighting, 8k, photorealistic"
+  negative_prompt: "blurry, low quality, deformed, extra limbs, ugly, bad anatomy, artifacts"
+  resolution:
+    width: 1024
+    height: 1024
+  model:
+    repo_id: "black-forest-labs/FLUX.1-dev"
+    dtype: "bfloat16"
+    device: "cuda"
+  sampler:
+    steps: 20
+    cfg: 3.5
+    seed: 530
+
+  characters:
+    - id: "hari"
+      name: "Hari (har1)"
+      prompt: "photo of tfphar1, a man with dark hair with grey temples, smiling warmly, wearing a relaxed dark crewneck sweater, sitting on the left side of the booth resting arms on the table"
+      lora:
+        path: "loras/har1.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 60
+        y: 170
+        width: 290
+        height: 700
+
+    - id: "rishi"
+      name: "Rishi (r15h1)"
+      prompt: "photo of rishi, handsome man wearing black rectangular eyeglasses, styled voluminous black hair, neat full beard, wearing a charcoal wool sweater, sitting in the center of the booth holding a glass, smiling warmly"
+      lora:
+        path: "loras/rishi.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 370
+        y: 160
+        width: 290
+        height: 710
+
+    - id: "onish"
+      name: "0n15h"
+      prompt: "photo of 0n15h, young man with short dark hair, cheerful laughing expression, wearing a casual burgundy button-up shirt, sitting on the right side of the booth leaning in to talk"
+      lora:
+        path: "loras/0n15h.safetensors"
+        strength: 0.85
+      mask:
+        type: "bbox"
+        x: 680
+        y: 170
+        width: 290
+        height: 700
+
+  inpaint:
+    strength: 0.88
+    mask_padding: 24
+    mask_blur: 10
+    mask_grow: 16
+
+  output:
+    path: "./output/trio_scene3_lounge.png"
+    save_intermediates: true
