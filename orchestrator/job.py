@@ -81,6 +81,9 @@ class ModelConfig(BaseModel):
     repo_id: str = "black-forest-labs/FLUX.1-dev"
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto"
     device: Literal["cuda", "mps", "cpu", "auto"] = "auto"
+    quantization: Literal["none", "fp8", "int8", "int4", "auto"] = "none"
+    transformer_path: str | None = None
+    text_encoder_dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto"
 
 
 class SamplerConfig(BaseModel):

@@ -232,10 +232,13 @@ The web interface is a modern React + Tailwind application mirroring all CLI cap
   - `pipe.enable_vae_tiling()` (processes the VAE decode in tiles to prevent peak VRAM allocation spikes).
 - **Requirement:** Ensure your host has at least **32 GB of system RAM**.
 
-### 2. MacBook Pro M5 Pro (24 GB Unified Memory)
+### 2. MacBook Pro (Apple Silicon MPS - 16GB / 24GB / 36GB Unified Memory)
 - On Apple Silicon, unified memory is shared between CPU and GPU.
-- Inpainter automatically selects `float16` precision for MPS and applies VAE tiling.
-- Generation will be slower than CUDA (~3–7 minutes per pass), but yields identical high-quality output without swapping.
+- Inpainter automatically selects `bfloat16` precision for MPS and applies VAE tiling with model offload.
+- **Quantization for Low RAM Macs (16GB/24GB)**:
+  - Set `quantization: "int8"` in your job config to apply native `torchao` int8 weight-only quantization (`uv add torchao`), reducing transformer memory by ~50% (from 12 GB down to ~6 GB).
+  - Alternatively, specify a pre-quantized single-file checkpoint via `transformer_path: "path/to/flux1-dev-fp8.safetensors"` or an HF repo.
+  - See `examples/mps_quantized.yaml` for a ready-to-run Mac configuration.
 
 ---
 

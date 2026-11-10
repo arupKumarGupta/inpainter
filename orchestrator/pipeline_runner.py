@@ -54,10 +54,44 @@ class PipelineRunner:
         logger.info(f"Loading base inpaint model: {model_config.repo_id}...")
         logger.info(f"Using device: {self.device_config.device_str}, dtype: {self.device_config.dtype_str}")
 
+        pipe_kwargs: dict[str, Any] = {
+            "torch_dtype": self.device_config.dtype,
+        }
+
+        # Handle custom / quantized transformer (e.g. single-file FP8 or GGUF or custom checkpoint)
+        if model_config.transformer_path:
+            logger.info(f"Loading custom transformer from: {model_config.transformer_path}")
+            t_path = Path(model_config.transformer_path)
+            from diffusers import FluxTransformer2DModel
+            if t_path.is_file() or str(model_config.transformer_path).endswith(".safetensors"):
+                pipe_kwargs["transformer"] = FluxTransformer2DModel.from_single_file(
+                    str(model_config.transformer_path),
+                    torch_dtype=self.device_config.dtype,
+                )
+            else:
+                pipe_kwargs["transformer"] = FluxTransformer2DModel.from_pretrained(
+                    model_config.transformer_path,
+                    torch_dtype=self.device_config.dtype,
+                )
+
         self.pipe = FluxInpaintPipeline.from_pretrained(
             model_config.repo_id,
-            torch_dtype=self.device_config.dtype,
+            **pipe_kwargs,
         )
+
+        # Handle post-load weight quantization (e.g. torchao int8 for MPS or CUDA)
+        if model_config.quantization in ("int8", "int4"):
+            try:
+                from torchao.quantization import quantize_, int8_weight_only
+                logger.info(f"Applying torchao {model_config.quantization} weight-only quantization (MPS/CUDA compatible)...")
+                quantize_(self.pipe.transformer, int8_weight_only())
+            except ImportError:
+                logger.warning(
+                    f"torchao is not installed to apply '{model_config.quantization}' quantization. "
+                    "Install with 'uv add torchao' for native MPS/CUDA int8 quantization. Proceeding with unquantized weights."
+                )
+            except Exception as q_err:
+                logger.warning(f"Could not apply torchao quantization: {q_err}. Proceeding with unquantized weights.")
 
         if not self.device_config.enable_cpu_offload:
             self.pipe = self.pipe.to(self.device_config.device)
@@ -159,7 +193,10 @@ class PipelineRunner:
             output = active_pipe(**kwargs)
 
         self._clear_vram_cache()
-        return output.images[0]
+        raw_image = output.images[0]
+        # Pixel-level alpha compositing with prev_image prevents generational VAE noise accumulation
+        blended_image = Image.composite(raw_image, prev_image, mask)
+        return blended_image
 
     def _clear_vram_cache(self) -> None:
         gc.collect()

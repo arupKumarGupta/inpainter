@@ -1,0 +1,52 @@
+job:
+  scene_prompt: "Modern cozy sunlit studio apartment with wooden floors, indoor plants, city view through large window, warm soft lighting, 8k, photorealistic"
+  negative_prompt: "blurry, low quality, deformed, extra limbs, ugly, bad anatomy, artifacts"
+  resolution:
+    width: 1024
+    height: 1024
+  model:
+    repo_id: "black-forest-labs/FLUX.1-dev"
+    dtype: "bfloat16"
+    device: "mps"           # Apple Silicon MPS acceleration
+    quantization: "int8"     # int8 weight-only quantization via torchao for low RAM footprint
+  sampler:
+    steps: 20
+    cfg: 2.8
+    seed: 101
+
+  characters:
+    - id: "hari"
+      name: "Hari (har1)"
+      prompt: "photo of tfphar1, a man with dark hair with grey temples, friendly gentle smile, wearing a casual navy blue collared shirt, sitting on a modern stool, looking engaged"
+      lora:
+        path: "loras/har1.safetensors"
+        strength: 0.65
+      mask:
+        type: "bbox"
+        x: 80
+        y: 160
+        width: 320
+        height: 720
+
+    - id: "onish"
+      name: "0n15h"
+      prompt: "photo of tfp0n15h, young man with short curly dark hair, cheerful smiling expression, wearing a warm tan bomber jacket, standing holding a coffee mug, looking towards his friend"
+      lora:
+        path: "loras/0n15h.safetensors"
+        strength: 0.60
+      mask:
+        type: "bbox"
+        x: 580
+        y: 160
+        width: 320
+        height: 720
+
+  inpaint:
+    strength: 0.95
+    mask_padding: 20
+    mask_blur: 12
+    mask_grow: 16
+
+  output:
+    path: "./output/mps_quantized_scene.png"
+    save_intermediates: true

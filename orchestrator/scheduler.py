@@ -135,7 +135,8 @@ class Scheduler:
     ) -> Path | None:
         if not job_config.output.save_intermediates:
             return None
-        inter_path = self.output_dir / f"pass_{pass_index}.png"
+        stem = Path(job_config.output.path).stem
+        inter_path = self.output_dir / f"{stem}_pass{pass_index}.png"
         image.save(inter_path)
         logger.info(f"Saved intermediate: {inter_path}")
         return inter_path

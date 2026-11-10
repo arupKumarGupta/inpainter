@@ -10,7 +10,7 @@ job:
     device: "cuda"
   sampler:
     steps: 20
-    cfg: 3.5
+    cfg: 2.8
     seed: 530
 
   characters:
@@ -19,7 +19,7 @@ job:
       prompt: "photo of tfphar1, a man with dark hair with grey temples, smiling warmly, wearing a relaxed dark crewneck sweater, sitting on the left side of the booth resting arms on the table"
       lora:
         path: "loras/har1.safetensors"
-        strength: 0.85
+        strength: 0.65
       mask:
         type: "bbox"
         x: 60
@@ -29,10 +29,10 @@ job:
 
     - id: "rishi"
       name: "Rishi (r15h1)"
-      prompt: "photo of rishi, handsome man wearing black rectangular eyeglasses, styled voluminous black hair, neat full beard, wearing a charcoal wool sweater, sitting in the center of the booth holding a glass, smiling warmly"
+      prompt: "photo of r15h1, handsome man with styled voluminous black hair, neat full beard, black rectangular glasses, wearing a charcoal wool sweater, sitting in the center of the booth holding a glass, smiling warmly"
       lora:
-        path: "loras/rishi.safetensors"
-        strength: 0.85
+        path: "loras/r15h1.safetensors"
+        strength: 0.65
       mask:
         type: "bbox"
         x: 370
@@ -42,10 +42,10 @@ job:
 
     - id: "onish"
       name: "0n15h"
-      prompt: "photo of 0n15h, young man with short dark hair, cheerful laughing expression, wearing a casual burgundy button-up shirt, sitting on the right side of the booth leaning in to talk"
+      prompt: "photo of tfp0n15h, young man with short curly dark hair, cheerful laughing expression, wearing a casual burgundy button-up shirt, sitting on the right side of the booth leaning in to talk"
       lora:
         path: "loras/0n15h.safetensors"
-        strength: 0.85
+        strength: 0.60
       mask:
         type: "bbox"
         x: 680
@@ -54,9 +54,9 @@ job:
         height: 700
 
   inpaint:
-    strength: 0.88
-    mask_padding: 24
-    mask_blur: 10
+    strength: 0.95
+    mask_padding: 20
+    mask_blur: 12
     mask_grow: 16
 
   output:

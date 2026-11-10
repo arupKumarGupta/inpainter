@@ -10,7 +10,7 @@ job:
     device: "cuda"
   sampler:
     steps: 20
-    cfg: 3.5
+    cfg: 2.8
     seed: 420
 
   characters:
@@ -19,7 +19,7 @@ job:
       prompt: "photo of tfphar1, a man with dark hair with grey temples, friendly smile, wearing a dark green utility jacket and casual jeans, walking on the left side of the street with hands in pockets"
       lora:
         path: "loras/har1.safetensors"
-        strength: 0.85
+        strength: 0.65
       mask:
         type: "bbox"
         x: 60
@@ -29,10 +29,10 @@ job:
 
     - id: "onish"
       name: "0n15h"
-      prompt: "photo of 0n15h, young man with short dark hair, lively smiling expression, wearing a warm tan bomber jacket over white shirt, walking in the center looking between his friends"
+      prompt: "photo of tfp0n15h, young man with short curly dark hair, lively smiling expression, wearing a warm tan bomber jacket over white shirt, walking in the center looking between his friends"
       lora:
         path: "loras/0n15h.safetensors"
-        strength: 0.85
+        strength: 0.60
       mask:
         type: "bbox"
         x: 370
@@ -42,10 +42,10 @@ job:
 
     - id: "rishi"
       name: "Rishi (r15h1)"
-      prompt: "photo of rishi, handsome man wearing black rectangular eyeglasses, styled voluminous black hair, neat full beard, wearing a charcoal grey jacket and denim jeans, carrying a backpack, walking on the right laughing mid-conversation"
+      prompt: "photo of r15h1, handsome man with styled voluminous black hair, neat full beard, black rectangular glasses, wearing a charcoal grey jacket and denim jeans, carrying a backpack, walking on the right laughing mid-conversation"
       lora:
-        path: "loras/rishi.safetensors"
-        strength: 0.85
+        path: "loras/r15h1.safetensors"
+        strength: 0.65
       mask:
         type: "bbox"
         x: 680
@@ -54,9 +54,9 @@ job:
         height: 730
 
   inpaint:
-    strength: 0.88
-    mask_padding: 24
-    mask_blur: 10
+    strength: 0.95
+    mask_padding: 20
+    mask_blur: 12
     mask_grow: 16
 
   output:
